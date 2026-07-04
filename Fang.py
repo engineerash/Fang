@@ -8,35 +8,39 @@ st.set_page_config(page_title="SOC IOC Defanger", page_icon="🛡️")
 def classify_ioc(ioc):
     """Categorizes the indicator type for AQL mapping."""
     ioc = ioc.lower()
+    # URL Detection
     if any(x in ioc for x in ["http", "https", "://"]): return "url"
-    if any(x in ioc for x in ["www", ".com", ".org", ".net"]): return "domain"
-    # Basic IP detection
+    # Domain Detection
+    if any(x in ioc for x in [".com", ".org", ".net", ".biz", ".site", ".co.uk"]): return "domain"
+    # IP Detection (Simple heuristic)
     if ioc.count('.') == 3 and all(p.isdigit() for p in ioc.split('.')): return "ip"
-    # Hash detection based on length
+    # Hash Detection based on length
     if len(ioc) == 32: return "md5"
     if len(ioc) == 40: return "sha1"
     if len(ioc) == 64: return "sha256"
     return "filename"
 
 st.title("🛡️ SOC IOC Defanger & Sorter")
-st.markdown("Upload your Excel/CSV file to defang and categorize IOCs for your AQL generator.")
+st.markdown("This tool processes your fanged IOCs from Column B of your Excel/CSV.")
 
-uploaded_file = st.file_uploader("Upload fanged IOC file", type=["xlsx", "csv"])
+uploaded_file = st.file_uploader("Upload your IOC file", type=["xlsx", "csv"])
 
 if uploaded_file:
     try:
-        # Load Data: header=None treats the first row as data, not column headers
+        # Load Data: header=None reads from first row, iloc[:, 1] targets Column B
         if uploaded_file.name.endswith('.xlsx'):
             df = pd.read_excel(uploaded_file, header=None)
         else:
             df = pd.read_csv(uploaded_file, header=None)
         
-        # Select first column and drop empty cells
-        raw_iocs = df.iloc[:, 0].dropna().astype(str).tolist()
+        # Target Column B (index 1) and drop empty rows
+        raw_iocs = df.iloc[:, 1].dropna().astype(str).tolist()
         
         # Defang and Sort
         processed_data = []
         for item in raw_iocs:
+            # Skip rows that might be headers or junk
+            if len(item) < 3: continue 
             clean_ioc = fang(item)
             category = classify_ioc(clean_ioc)
             processed_data.append({"value": clean_ioc, "type": category})
