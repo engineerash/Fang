@@ -2,33 +2,53 @@ import streamlit as st
 import pandas as pd
 from ioc_fanger import fang
 
-def process_iocs(df):
-    """Cleans and deduplicates IOCs from a DataFrame."""
-    # Assuming 'Indicator' is the column containing the fanged data
-    raw_iocs = df['Indicator'].dropna().tolist()
-    
-    # "Fang" the IOCs and use a set for automatic deduplication
-    cleaned_iocs = {fang(ioc) for ioc in raw_iocs}
-    
-    return sorted(list(cleaned_iocs))
+def classify_ioc(ioc):
+    """Simple heuristic to label IOCs based on content."""
+    ioc = ioc.lower()
+    if any(x in ioc for x in ["http", "https", "://"]): return "url"
+    if any(x in ioc for x in ["www", ".com", ".org", ".net"]): return "domain"
+    # Basic IP detection
+    if ioc.count('.') == 3 and all(p.isdigit() for p in ioc.split('.')): return "ip"
+    # Hash detection based on length
+    if len(ioc) == 32: return "md5"
+    if len(ioc) == 40: return "sha1"
+    if len(ioc) == 64: return "sha256"
+    return "unknown"
 
-st.title("IOC Fanger & AQL Formatter")
+def process_ioc_file(uploaded_file):
+    """Processes uploaded file and returns a DataFrame with 'value,label' format."""
+    # Reading file (adjust based on your specific Excel/CSV column names)
+    if uploaded_file.name.endswith('.xlsx'):
+        df = pd.read_excel(uploaded_file)
+    else:
+        df = pd.read_csv(uploaded_file)
+    
+    # Assume the first column contains the IOCs
+    raw_iocs = df.iloc[:, 0].dropna().astype(str).tolist()
+    
+    processed_data = []
+    for raw_ioc in raw_iocs:
+        clean_ioc = fang(raw_ioc)
+        label = classify_ioc(clean_ioc)
+        processed_data.append({"value": clean_ioc, "label": label})
+        
+    return pd.DataFrame(processed_data)
+
+st.title("SOC IOC to AQL Formatter")
 
 uploaded_file = st.file_uploader("Upload your fanged IOC Excel/CSV", type=["xlsx", "csv"])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
+    result_df = process_ioc_file(uploaded_file)
+    st.write("### Processed IOCs (Ready for AQL Generator):")
+    st.dataframe(result_df)
     
-    if st.button("Process IOCs"):
-        results = process_iocs(df)
-        st.write("### Cleaned IOCs:")
-        st.code("\n".join(results))
-        
-        # Prepare for download
-        results_str = "\n".join(results)
-        st.download_button(
-            label="Download Cleaned IOCs",
-            data=results_str,
-            file_name="cleaned_iocs.txt",
-            mime="text/plain"
-        )
+    # Convert to the CSV format your generator likely expects
+    csv_data = result_df.to_csv(index=False)
+    
+    st.download_button(
+        label="Download Formatted IOCs",
+        data=csv_data,
+        file_name="formatted_iocs.csv",
+        mime="text/csv"
+    )
